@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Factor Tree: Audio Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <style>
+        /* BASE STYLES */
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; background-color: #F1F8E9;
+            font-family: 'Segoe UI', Tahoma, Verdana, sans-serif;
+            touch-action: none; user-select: none; -webkit-user-select: none;
+        }
+
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; display: flex; flex-direction: column;
+            justify-content: space-between; z-index: 20;
+        }
+
+        /* HEADER STATUS */
+        #header { text-align: center; padding-top: 20px; pointer-events: auto; }
+        .status-badge {
+            background: white; padding: 12px 24px; border-radius: 50px;
+            border: 3px solid #388E3C; color: #2E7D32; font-weight: 700;
+            font-size: 1.2rem; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: inline-block; transition: all 0.2s; cursor: pointer;
+        }
+        .status-badge:active { transform: scale(0.95); }
+
+        /* FINAL EQUATION CARD */
+        #equation-card {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0);
+            background: rgba(255, 255, 255, 0.95); padding: 30px; border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2); text-align: center;
+            border: 4px solid #FBC02D; pointer-events: auto; opacity: 0;
+            transition: all 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+        #equation-card.visible { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+        .math-text { font-size: 2rem; color: #333; margin: 10px 0; font-family: 'Courier New', Courier, monospace; font-weight: bold; }
+        .label-text { color: #666; font-size: 1rem; text-transform: uppercase; letter-spacing: 2px; }
+
+        /* SIDEBAR */
+        #sidebar {
+            position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+            display: flex; flex-direction: column; gap: 12px; pointer-events: auto;
+            background: rgba(255, 255, 255, 0.9); padding: 12px; border-radius: 30px;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.15); backdrop-filter: blur(8px);
+            transition: opacity 0.3s;
+        }
+        #sidebar.hidden { opacity: 0; pointer-events: none; }
+
+        .prime-btn {
+            width: 55px; height: 55px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 800; color: white; font-size: 22px; cursor: grab;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: transform 0.1s;
+        }
+        .prime-btn:active { transform: scale(0.9); }
+
+        /* FOOTER */
+        #controls { padding: 25px; pointer-events: auto; display: flex; gap: 10px; }
+        .btn-restart {
+            background: #388E3C; color: white; border: none; padding: 12px 24px;
+            border-radius: 12px; font-size: 16px; font-weight: bold; cursor: pointer;
+            box-shadow: 0 4px 0 #1B5E20; transition: transform 0.1s;
+        }
+        .btn-restart:active { transform: translateY(4px); box-shadow: none; }
+        
+        .btn-sound {
+            background: #fff; color: #333; border: 2px solid #ccc; padding: 12px;
+            border-radius: 12px; font-size: 20px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div id="header">
+            <div id="status-text" class="status-badge" onclick="Synth.init()">Tap here to enable Sound 🔊</div>
+        </div>
+
+        <div id="equation-card">
+            <div class="label-text">Prime Factorization</div>
+            <div id="final-math" class="math-text">30 = 2 × 3 × 5</div>
+            <div style="margin-top:15px; font-size: 0.9rem; color:#888;">(The tree is complete!)</div>
+        </div>
+
+        <div id="sidebar"></div>
+
+        <div id="controls">
+            <button class="btn-restart" onclick="resetSim()">🔄 New Number</button>
+        </div>
+    </div>
+
+    <script>
+        // ==========================================
+        // 🎵 PROCEDURAL AUDIO ENGINE (Web Audio API)
+        // ==========================================
+        const Synth = {
+            ctx: null,
+            enabled: true,
+            init: () => {
+                if (!Synth.ctx) {
+                    Synth.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                    document.getElementById('status-text').innerText = "Factorize the Top Box!";
+                }
+                if (Synth.ctx.state === 'suspended') Synth.ctx.resume();
+            },
+            playTone: (freq, type, duration, vol = 0.1) => {
+                if (!Synth.ctx || !Synth.enabled) return;
+                const osc = Synth.ctx.createOscillator();
+                const gain = Synth.ctx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, Synth.ctx.currentTime);
+                
+                // Envelope
+                gain.gain.setValueAtTime(0, Synth.ctx.currentTime);
+                gain.gain.linearRampToValueAtTime(vol, Synth.ctx.currentTime + 0.01);
+                gain.gain.exponentialRampToValueAtTime(0.001, Synth.ctx.currentTime + duration);
+
+                osc.connect(gain);
+                gain.connect(Synth.ctx.destination);
+                osc.start();
+                osc.stop(Synth.ctx.currentTime + duration);
+            },
+            // Sound Effects
+            pickup: () => Synth.playTone(440, 'sine', 0.1, 0.05), // Soft blip
+            dropSuccess: (depth) => { 
+                // Pitch rises as tree gets deeper (C Major Arpeggio)
+                const notes = [261.63, 329.63, 392.00, 523.25, 659.25, 783.99]; 
+                let note = notes[Math.min(depth, notes.length-1)];
+                Synth.playTone(note, 'triangle', 0.4, 0.1);
+                setTimeout(() => Synth.playTone(note * 1.5, 'sine', 0.4, 0.05), 50); // Harmonics
+            },
+            dropFail: () => {
+                Synth.playTone(150, 'sawtooth', 0.3, 0.05); // Low buzz
+                setTimeout(() => Synth.playTone(140, 'sawtooth', 0.3, 0.05), 100);
+            },
+            win: () => {
+                // Victory Fanfare
+                let t = 0;
+                [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                    setTimeout(() => Synth.playTone(freq, 'square', 0.3, 0.05), t);
+                    t += 150;
+                });
+            }
+        };
+
+        // ==========================================
+        // VISUAL CONFIG
+        // ==========================================
+        const PRIMES = [2, 3, 5, 7, 11, 13];
+        const COLORS = {
+            2: '#D32F2F', 3: '#F57C00', 5: '#388E3C', 7: '#1976D2', 11: '#7B1FA2', 13: '#0097A7',
+            composite: '#FFF3E0', stroke: '#5D4037', bg: '#F1F8E9'
+        };
+        const LEVELS = {
+            easy: [12, 18, 20, 30, 45, 50],
+            medium: [60, 72, 84, 90, 100, 150],
+            hard: [210, 315, 462, 2310, 32760]
+        };
+        
+        let nodes = [];
+        let activeNode = null;
+        let particles = [];
+        let draggedItem = null;
+        let camY = 0, targetCamY = 0;
+        let camX = 0, targetCamX = 0;
+        let rootValue = 0;
+        let isComplete = false;
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            
+            const sidebar = document.getElementById('sidebar');
+            PRIMES.forEach(p => {
+                let btn = document.createElement('div');
+                btn.className = 'prime-btn';
+                btn.style.backgroundColor = COLORS[p];
+                btn.innerText = p;
+                
+                const start = (cx, cy) => { 
+                    if(!isComplete) {
+                        Synth.init(); // Ensure audio context is ready
+                        draggedItem = { val: p, x: cx, y: cy }; 
+                        Synth.pickup(); // 🔊 Sound
+                    }
+                };
+                
+                btn.onmousedown = (e) => start(e.clientX, e.clientY);
+                btn.ontouchstart = (e) => { e.preventDefault(); start(e.touches[0].clientX, e.touches[0].clientY); };
+                
+                sidebar.appendChild(btn);
+            });
+            resetSim();
+        }
+
+        function draw() {
+            background(COLORS.bg);
+            
+            camY = lerp(camY, targetCamY, 0.08);
+            camX = lerp(camX, targetCamX, 0.08);
+
+            push();
+            translate(width/2 - camX, 120 - camY);
+
+            stroke(COLORS.stroke); strokeWeight(4); noFill();
+            for (let n of nodes) {
+                if (n.parent) bezier(n.parent.x, n.parent.y+25, n.parent.x, n.parent.y+65, n.x, n.y-65, n.x, n.y-25);
+            }
+
+            for (let n of nodes) drawNode(n);
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.vy += 0.2; p.life -= 3;
+                fill(p.col); noStroke(); circle(p.x, p.y, p.s);
+                if (p.life <= 0) particles.splice(i, 1);
+            }
+            pop();
+
+            if (draggedItem) {
+                fill(COLORS[draggedItem.val]); noStroke(); circle(mouseX, mouseY, 60);
+                fill(255); textAlign(CENTER, CENTER); textSize(24); textStyle(BOLD); text(draggedItem.val, mouseX, mouseY);
+            }
+        }
+
+        function drawNode(n) {
+            n.scale = lerp(n.scale, 1, 0.15);
+            push(); translate(n.x, n.y); scale(n.scale);
+
+            fill(0, 15); noStroke(); rect(-40, -21, 80, 50, 10);
+            
+            strokeWeight(3); stroke(COLORS.stroke);
+            if (n.isPrime) {
+                fill(COLORS[n.val]); stroke(255);
+                if(isComplete) {
+                    let p = sin(frameCount * 0.1 + n.x) * 0.05;
+                    scale(1 + p); stroke(255, 255, 0);
+                }
+            } else {
+                fill(COLORS.composite);
+                if (n === activeNode) {
+                    stroke('#388E3C'); strokeWeight(5);
+                    scale(1.05 + sin(frameCount*0.1)*0.02);
+                }
+            }
+            rectMode(CENTER); rect(0, 0, 80, 50, 10);
+
+            noStroke(); fill(n.isPrime ? 255 : '#3E2723');
+            textAlign(CENTER, CENTER); textSize(22); textStyle(BOLD); text(n.val, 0, 0);
+            pop();
+        }
+
+        function mouseReleased() { handleDrop(); }
+        function touchEnded() { handleDrop(); }
+
+        function handleDrop() {
+            if (draggedItem && activeNode && !isComplete) {
+                let worldX = mouseX - (width/2 - camX);
+                let worldY = mouseY - (120 - camY);
+                if (dist(worldX, worldY, activeNode.x, activeNode.y) < 70) attemptSplit(draggedItem.val);
+            }
+            draggedItem = null;
+        }
+
+        function attemptSplit(prime) {
+            if (activeNode.val % prime === 0) {
+                let rem = activeNode.val / prime;
+                let p = activeNode;
+                let gapY = 100, gapX = 70;
+                
+                // Determine Depth for audio pitch
+                let depth = 0;
+                let curr = p;
+                while(curr.parent) { depth++; curr = curr.parent; }
+
+                Synth.dropSuccess(depth); // 🔊 Success Sound
+
+                let left = { val: prime, x: p.x - gapX, y: p.y + gapY, parent: p, isPrime: true, scale: 0 };
+                let isRemPrime = isPrime(rem);
+                let right = { val: rem, x: p.x + gapX, y: p.y + gapY, parent: p, isPrime: isRemPrime, scale: 0 };
+
+                nodes.push(left, right);
+                spawnConfetti(left.x, left.y, COLORS[prime]);
+
+                if (isRemPrime) {
+                    finishGame();
+                } else {
+                    activeNode = right;
+                    setStatus(`Correct! ${p.val} ÷ ${prime} = ${rem}`, "#388E3C");
+                    targetCamY = right.y - 100;
+                    targetCamX = right.x / 2;
+                }
+            } else {
+                Synth.dropFail(); // 🔊 Error Sound
+                setStatus(`Oops! ${activeNode.val} is not divisible by ${prime}`, "#D32F2F");
+            }
+        }
+
+        function finishGame() {
+            activeNode = null;
+            isComplete = true;
+            Synth.win(); // 🔊 Win Sound
+            
+            document.getElementById('sidebar').classList.add('hidden');
+            
+            let maxY = nodes[nodes.length-1].y;
+            targetCamY = maxY / 2 - 50; targetCamX = 0; 
+            
+            let primes = nodes.filter(n => n.isPrime).map(n => n.val).sort((a,b)=>a-b);
+            let eqStr = `${rootValue} = ` + primes.join(' × ');
+            
+            document.getElementById('final-math').innerText = eqStr;
+            document.getElementById('equation-card').classList.add('visible');
+            setStatus("🌟 Factor Tree Complete! 🌟", "#FBC02D");
+            
+            for(let n of nodes) {
+                if(n.isPrime) spawnConfetti(n.x, n.y, COLORS[n.val]);
+            }
+        }
+
+        function resetSim() {
+            Synth.init(); // Ensure audio start
+            Synth.pickup();
+            
+            isComplete = false;
+            document.getElementById('sidebar').classList.remove('hidden');
+            document.getElementById('equation-card').classList.remove('visible');
+            
+            let pool = Math.random() < 0.5 ? LEVELS.easy : LEVELS.medium;
+            if(Math.random() < 0.2) pool = LEVELS.hard;
+            
+            rootValue = pool[Math.floor(Math.random() * pool.length)];
+            
+            nodes = [{ val: rootValue, x: 0, y: 0, parent: null, isPrime: false, scale: 0 }];
+            activeNode = nodes[0];
+            
+            camY = -100; targetCamY = 0; camX = 0; targetCamX = 0;
+            setStatus(`Factorize ${rootValue}!`, "#388E3C");
+        }
+
+        function setStatus(msg, col) {
+            let el = document.getElementById('status-text');
+            el.innerText = msg; el.style.borderColor = col; el.style.color = col === '#FBC02D' ? '#F57F17' : col;
+            el.style.transform = "scale(1.1)"; setTimeout(()=>el.style.transform="scale(1)", 200);
+        }
+
+        function isPrime(n) {
+            if (n < 2) return false;
+            for (let i = 2; i <= Math.sqrt(n); i++) if (n % i === 0) return false;
+            return true;
+        }
+
+        function spawnConfetti(wx, wy, col) {
+            for(let i=0; i<15; i++) particles.push({ x: wx, y: wy, vx: random(-5,5), vy: random(-8,-2), s: random(5,10), life: 255, col: col });
+        }
+
+        function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+        document.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+    </script>
+</body>
+</html>
