@@ -16,6 +16,7 @@
             --accent-orange: #f97316;
             --accent-purple: #a855f7;
             --success: #10b981;
+            --success-bg: #d1fae5;
             --danger: #ef4444;
             --text-main: #1e293b;
             --text-muted: #64748b;
@@ -90,7 +91,6 @@
             overflow-y: auto;
             scroll-behavior: smooth;
             background: #f1f5f9;
-            /* Fade effect at bottom */
             mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
             -webkit-mask-image: linear-gradient(to bottom, black 85%, transparent 100%);
         }
@@ -106,7 +106,7 @@
             transform-origin: center bottom;
             animation: slideIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
             transition: all 0.3s ease;
-            opacity: 0.8; /* Slight fade for history */
+            opacity: 0.8; 
         }
 
         .step-card.active {
@@ -160,7 +160,20 @@
             color: #991b1b;
         }
 
-        /* Spacer to allow scrolling past the last element */
+        /* Style for RATIONAL number */
+        .step-card.rational-card {
+            background: #f0fdf4;
+            border-color: var(--success);
+        }
+        .step-card.rational-card .step-explanation {
+            background: #fff;
+            border-left-color: var(--success);
+            color: #065f46;
+        }
+        .step-card.rational-card .step-math {
+            color: var(--success);
+        }
+
         .feed-spacer { min-height: 50px; }
 
         /* Math Components */
@@ -258,6 +271,7 @@
             gap: 6px;
         }
         .lock-badge.broken { background: #fee2e2; color: #dc2626; }
+        .lock-badge.rational { background: #dcfce7; color: #166534; border: 1px solid #166534; }
 
         .btn-group {
             display: flex;
@@ -353,13 +367,13 @@
 
         <div class="control-panel">
             <div class="panel-card">
-                <label class="input-label">PROVING IRRATIONALITY OF √n</label>
+                <label class="input-label">NUMBER EXPLORER (√n)</label>
                 <div class="input-wrapper">
                     <div style="display:flex; flex-direction:column;">
                         <span style="font-family:'Fredoka'; font-size:1.5rem; margin-right:10px;">n =</span>
                         <div id="errorMsg" class="msg-toast">Must be square-free!</div>
                     </div>
-                    <input type="number" id="nInput" class="num-input" value="2" min="2" max="99" onchange="validateAndReset()">
+                    <input type="number" id="nInput" class="num-input" value="2" min="2" max="144" onchange="validateAndReset()">
                 </div>
             </div>
 
@@ -424,12 +438,10 @@
     let state = { step: 0, n: 2 };
     const STEPS_TOTAL = 10;
     
-    // Safety Check: We only want Square-Free numbers
-    // If n=12, a^2 could be divisible by 12 (36) while a (6) is NOT.
-    // The proof requires "If p divides a^2, p divides a", which is true for Primes or Square-Free numbers.
+    // Safety Check: We only want Square-Free numbers for the IRRATIONAL proof
     function isSquareFree(n) {
         if (n < 2) return false;
-        if (Number.isInteger(Math.sqrt(n))) return false; // Perfect squares are Rational
+        // Perfect squares are NOT square free, but we handle them separately now
         for (let i = 2; i * i <= n; i++) {
             if (n % (i * i) === 0) return false;
         }
@@ -449,12 +461,23 @@
     function validateAndReset() {
         let val = parseInt(dom.input.value);
         if(isNaN(val)) val = 2;
-        if(val < 2) val = 2;
+        if(val < 1) val = 1;
 
         dom.error.style.opacity = '0';
         dom.input.classList.remove('error');
 
-        // Check Validity
+        // --- NEW LOGIC START ---
+        
+        // 1. Check for Perfect Square (Rational)
+        const root = Math.sqrt(val);
+        if (Number.isInteger(root)) {
+            showRationalProof(val, root);
+            return;
+        }
+
+        // 2. Check for Non-Square-Free Composite (like 12, 18)
+        // These are irrational, but the specific "divisibility" proof provided is complex for them
+        // so we reject them to keep the math clean for the student.
         if (!isSquareFree(val)) {
             dom.input.classList.add('error');
             dom.error.style.opacity = '1';
@@ -462,20 +485,55 @@
             
             // Suggest safe number
             let safe = val + 1;
-            while(!isSquareFree(safe)) safe++;
+            while(!isSquareFree(safe) || Number.isInteger(Math.sqrt(safe))) safe++;
             dom.error.innerText = `Try ${safe} instead?`;
-            
-            // Allow them to proceed, but with warning, or reset?
-            // Resetting prevents broken math.
             return;
         }
 
+        // 3. Valid Square-Free Integer -> Proceed with Contradiction Proof
         resetProof(val);
+        // --- NEW LOGIC END ---
     }
 
     function hardReset() {
         AudioSys.click();
         validateAndReset();
+    }
+
+    // NEW FUNCTION: Handles Rational Numbers
+    function showRationalProof(n, root) {
+        AudioSys.init();
+        
+        // Clear UI
+        dom.container.innerHTML = '';
+        dom.nextBtn.disabled = true;
+        dom.nextBtn.innerHTML = "Rational Number";
+        
+        // Update Badge
+        dom.lock.className = 'lock-badge rational';
+        dom.lock.innerHTML = '✅ RATIONAL';
+        
+        dom.bar.style.width = '100%';
+        dom.error.style.opacity = '0';
+        dom.input.classList.remove('error');
+
+        // Create the Rational Card
+        const card = document.createElement('div');
+        card.className = `step-card active rational-card`;
+        card.innerHTML = `
+            <div class="step-header">Calculation Complete</div>
+            <div class="step-math">√${n} &nbsp;=&nbsp; ${root}</div>
+            <div class="step-explanation">
+                <strong>It's a Perfect Square!</strong><br><br>
+                Since ${n} is a perfect square, its square root is exactly <strong>${root}</strong>.<br>
+                Because ${root} can be written as the fraction ${root}/1, it is a <strong>Rational Number</strong>.
+                <br><br>
+                No proof by contradiction is needed.
+            </div>
+        `;
+
+        dom.container.appendChild(card);
+        AudioSys.success();
     }
 
     function resetProof(nVal) {
